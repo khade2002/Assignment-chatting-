@@ -1,51 +1,351 @@
-# DevOps Engineering Assignment: Real-Time Chat App
+# 🚀 Real-Time WebSocket Chat Application Deployment
 
-Welcome! In this assignment, you are tasked with fixing a broken staging environment for our Real-Time Chat web application. 
+A production-style deployment of a containerized real-time WebSocket chat application using **Docker**, **Docker Compose**, **NGINX Reverse Proxy**, **AWS EC2**, and **GitHub Actions CI/CD**.
 
-A junior developer recently attempted to containerize this application using Docker and NGINX, but the deployment is currently failing on multiple fronts. Your job is to debug their configuration files and get the application fully operational via Docker Compose.
+This project focuses on infrastructure, deployment, container networking, and automation rather than backend development.
 
-## System Architecture
+---
 
-The application is built using two primary containers:
-1. **Backend (`backend`)**: A Python-based FastAPI server operating on Port 8000. It handles persistent, real-time WebSocket connections on the `/ws` endpoint.
-2. **Frontend Proxy (`nginx`)**: An NGINX container mapped to Port 80. It is responsible for serving the static files from the `frontend/` directory, while simultaneously intercepting and reverse-proxying all WebSocket upgrade requests down to the backend container.
+# Project Overview
 
-### Directory Structure
-```text
-realtime-chat-app/
+The objective of this assignment was to debug and deploy a deliberately misconfigured containerized WebSocket application.
+
+The backend application was already provided. The task involved identifying infrastructure issues, fixing deployment configurations, deploying the application to AWS EC2, and automating deployments using GitHub Actions.
+
+---
+
+# Tech Stack
+
+- FastAPI
+- WebSockets
+- Docker
+- Docker Compose
+- NGINX
+- AWS EC2
+- GitHub Actions
+- Ubuntu Linux
+
+---
+
+# Project Structure
+
+```
+.
 ├── app/
-│   ├── main.py              # FastAPI application server
-│   └── requirements.txt     # Python dependencies
+│   ├── main.py
+│   └── requirements.txt
 ├── frontend/
-│   └── index.html           # Simple, styled single-page HTML client
-├── Dockerfile               # Instructions to build the Python backend image
-├── docker-compose.yml       # Composes both NGINX and Python Backend services
-└── nginx.conf               # Configuration for NGINX routing and WS proxy
+│   └── index.html
+├── Dockerfile
+├── docker-compose.yml
+├── nginx.conf
+├── README.md
+└── .github
+    └── workflows
+        └── deploy.yml
 ```
 
-## Your Mission
+---
 
-If you run `docker-compose up -d --build` right now, the containers will start, but the application will not work. You need to debug and fix the following three critical issues:
+# Architecture
 
-### 1. Fix the Docker Binding (Container Networking)
-The FastAPI backend container is refusing external connections—even from the NGINX container! 
-* **Hint:** Look at how the `uvicorn` command is binding its host in the `Dockerfile`. Inside a Docker container, binding to `localhost` or `127.0.0.1` makes the service unreachable to other containers on the Docker network.
-
-### 2. Fix the Missing User Interface (Volume Mounts)
-If you navigate to `http://localhost` right now, you will likely see the default "Welcome to NGINX" page instead of the chat application.
-* **Hint:** Check `docker-compose.yml`. How is the `nginx` container supposed to get access to the static HTML files located in the local `frontend/` directory? 
-
-### 3. Fix the WebSocket Tunnel (Reverse Proxy Configuration)
-Once the UI is visible, the chat app will continuously say "Disconnected" because the WebSocket handshake is failing.
-* **Hint #1:** In `nginx.conf`, the `proxy_pass` is attempting to route to `localhost:8000`. Does `localhost` mean the same thing inside the NGINX container as it does on your laptop? How do containers communicate with each other in a Compose network?
-* **Hint #2:** NGINX requires explicit headers to convert standard HTTP traffic into a persistent WebSocket tunnel. Some of the required `Upgrade` headers appear to be missing or disabled.
-
-## Deliverables
-
-Submit your finalized, corrected codebase. We will evaluate your submission by executing:
-
-```bash
-docker-compose up -d --build
+```
+                 User Browser
+                      │
+                      │
+             HTTP / WebSocket
+                      │
+                      ▼
+          AWS EC2 (Ubuntu Server)
+                      │
+                      ▼
+        Docker Compose Network
+              │            │
+              │            │
+              ▼            ▼
+        NGINX Container   FastAPI Container
+              │
+              ▼
+      Static Frontend Files
 ```
 
-If everything is configured correctly, we should instantly see the UI and be able to open multiple browser tabs at `http://localhost` to chat back and forth in real-time. Good luck!
+---
+
+# Docker Container Setup
+
+The application consists of two containers.
+
+## Backend Container
+
+- FastAPI Application
+- WebSocket Server
+- Port 8000
+
+## Frontend Container
+
+- NGINX
+- Serves static frontend
+- Reverse proxies WebSocket requests
+- Port 80
+
+Docker Compose creates a dedicated bridge network allowing containers to communicate using service names.
+
+---
+
+# Docker Networking
+
+Docker Compose automatically creates a bridge network.
+
+Container communication happens using service names.
+
+Example:
+
+```
+backend:8000
+```
+
+instead of
+
+```
+localhost:8000
+```
+
+This enables NGINX to communicate with the backend container correctly.
+
+---
+
+# NGINX Reverse Proxy
+
+NGINX performs two responsibilities.
+
+## 1. Serves Frontend
+
+The frontend HTML page is served directly from NGINX.
+
+## 2. Reverse Proxy
+
+NGINX forwards all `/ws` requests to the FastAPI backend.
+
+Example:
+
+```
+Browser
+    │
+    ▼
+NGINX
+    │
+    ▼
+FastAPI
+```
+
+WebSocket upgrade headers are configured to maintain persistent WebSocket connections.
+
+---
+
+# WebSocket Flow
+
+```
+Browser
+    │
+WebSocket Connection
+    │
+    ▼
+NGINX
+    │
+Proxy Pass
+    │
+    ▼
+FastAPI Backend
+```
+
+Messages received by the backend are broadcast to all connected users, enabling real-time multi-user chat.
+
+---
+
+# Issues Found
+
+### Issue 1
+
+Docker container was listening on
+
+```
+127.0.0.1
+```
+
+instead of
+
+```
+0.0.0.0
+```
+
+Result:
+
+NGINX could not communicate with the backend container.
+
+Solution:
+
+Changed Uvicorn host binding to
+
+```
+0.0.0.0
+```
+
+---
+
+### Issue 2
+
+Frontend volume mapping was commented out inside
+
+```
+docker-compose.yml
+```
+
+Result:
+
+NGINX displayed the default welcome page.
+
+Solution:
+
+Enabled the frontend volume mount.
+
+---
+
+### Issue 3
+
+NGINX WebSocket proxy pointed to
+
+```
+localhost:8000
+```
+
+instead of
+
+```
+backend:8000
+```
+
+Result:
+
+WebSocket connection failed.
+
+Solution:
+
+Updated proxy_pass to the Docker service name.
+
+---
+
+### Issue 4
+
+WebSocket upgrade headers were commented.
+
+Result:
+
+WebSocket handshake failed.
+
+Solution:
+
+Enabled
+
+- Upgrade header
+- Connection header
+
+---
+
+# Deployment
+
+Application deployed on
+
+- AWS EC2
+- Ubuntu Server
+
+Deployment Steps
+
+```
+git clone <repository>
+
+cd devops
+
+docker compose up -d --build
+```
+
+Application is accessible using
+
+```
+http://<EC2-PUBLIC-IP>
+```
+
+---
+
+# CI/CD Pipeline
+
+GitHub Actions automatically deploys the application.
+
+Pipeline Flow
+
+```
+Developer
+
+↓
+
+Git Push
+
+↓
+
+GitHub Actions
+
+↓
+
+SSH into EC2
+
+↓
+
+Fetch Latest Code
+
+↓
+
+Rebuild Docker Containers
+
+↓
+
+Restart Containers
+
+↓
+
+Deployment Complete
+```
+
+Every push to the `main` branch automatically deploys the latest version to the EC2 instance.
+
+---
+
+# Repository Files
+
+- Dockerfile
+- docker-compose.yml
+- nginx.conf
+- GitHub Actions Workflow
+- README.md
+
+---
+
+# Future Improvements
+
+- HTTPS using Let's Encrypt
+- Terraform Infrastructure
+- Monitoring with Grafana
+- Redis Integration
+- Load Balancer
+- Auto Scaling
+
+---
+
+# Author
+
+**Prasad Khade**
+
+DevOps Engineer
+
+```
+GitHub:
+https://github.com/khade2002
+```
